@@ -19,17 +19,15 @@ module {
 		deploy_request_type: DeployRequestType;
 		canister_id:  ?Canister; 
 		reviewers: [Admin];
+		rejecters: [Admin];
 		review_passed: Bool;
 	};
 	// define DeployRequestType with install/uninstall/create/start/stop/delete canisters 
 	// using enumerated types to define basic enumerations, for which no payloads are required
 	public type DeployRequestType = {
-		#installCanister;
-		#uninstallCanister;
+		#addPermission;
+		#removePermission;
 		#createCanister;
-		#startCanister;
-		#stopCanister;
-		#deleteCanister;
 	};
 	// create a function pass_review to end the review process
 	public func pass_review(r: DeployRequest) : DeployRequest {
@@ -40,6 +38,7 @@ module {
 			deploy_request_type = r.deploy_request_type;
 			canister_id = r.canister_id;
 			reviewers = r.reviewers;
+			rejecters = r.rejecters;
 			review_passed = true;
   		}
 	};
@@ -52,7 +51,20 @@ module {
 			deploy_request_type = r.deploy_request_type;
 			canister_id = r.canister_id;
 			reviewers = Array.append(r.reviewers, [reviewer]);
-			review_passed = true;
+			rejecters = r.rejecters;
+			review_passed = r.review_passed;
+  		}
+	};
+	public func add_rejecter(r : DeployRequest, rejecter: Admin) : DeployRequest {
+		{
+			deploy_request_id = r.deploy_request_id;
+			deploy_requester = r.deploy_requester;
+			wasm_code = r.wasm_code;
+			deploy_request_type = r.deploy_request_type;
+			canister_id = r.canister_id;
+			reviewers = r.reviewers;
+			rejecters = Array.append(r.rejecters, [rejecter]);
+			review_passed = r.review_passed;
   		}
 	};
 	// create a function update_canister_id to update canister id to the proposal
@@ -64,6 +76,7 @@ module {
 			deploy_request_type = r.deploy_request_type;
 			canister_id = ?c_id;
 			reviewers = r.reviewers;
+			rejecters = r.rejecters;
 			review_passed = true;
   		}
 	};
