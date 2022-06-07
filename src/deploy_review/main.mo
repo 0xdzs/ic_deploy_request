@@ -3,7 +3,7 @@ import Blob "mo:base/Blob";
 import Buffer "mo:base/Buffer";
 import Cycles "mo:base/ExperimentalCycles";
 import Debug "mo:base/Debug";
-import Error "mo:base/Error";
+import Iter "mo:base/Iter";
 import HashMap "mo:base/HashMap";
 import Nat "mo:base/Nat";
 import Option "mo:base/Option";
@@ -11,6 +11,7 @@ import Principal "mo:base/Principal";
 
 import Array, Error, Buffer, Debug, Blob, Nat, Option, Principal from base library
 import DeployRequest "./deploy_request";
+import SHA256 "mo:sha256/SHA256";
 import IC "./ic";
 import IC, DeployRequest module from files
 
@@ -28,15 +29,13 @@ actor class cycle_manager(m : Nat, list : [DeployRequest.Admin]) = self {
 	// create ownedCanisters var initialized with an empty list;return a list(item type Canister)
 	var ownedCanisters : [Canister] = [];
 	// create canisters var initialized with an empty list;return a list(item type Canister)
-  	var ownedCanisterPermissions : HashMap.HashMap<Canister, Bool> = HashMap.HashMap<Canister, Bool>(0, func(x: Canister,y: Canister) {x==y}, Principal.hash);
+  	var CanisterPermissions : HashMap.HashMap<Canister, Bool> = HashMap.HashMap<Canister, Bool>(0, func(x: Canister,y: Canister) {x==y}, Principal.hash);
   	var adminList : [Admin] = list;
   	var M : Nat = m;
   	var N : Nat = adminList.size();
-	public query func get_model() : async (Nat, Nat) {
-		(M, N)
-	};
-	public query func get_permission(id: Canister) : async ?Bool {
-		ownedCanisterPermissions.get(id)
+	public func greet(name: Text) : async Text {
+		// return a Text
+		return "Hello, " # name # "!";
 	};
 	
 	// create a function deploy_request to start a deploy request process
@@ -46,15 +45,20 @@ actor class cycle_manager(m : Nat, list : [DeployRequest.Admin]) = self {
 
 		// only the canister that (permission = false) can add permission
 		if (deploy_request_type == #addPermission) {
-		assert(Option.isSome(canister_id));
-		let b = ownedCanisterPermissions.get(Option.unwrap(canister_id));
-		assert(Option.isSome(b) and (not Option.unwrap(b)));
-		};
+		assert(CanisterPermissions.get(Option.unwrap(canister_id)) == ?false);
 		// only the canister that (permission = true) can remove permission
 		if (deploy_request_type == #removePermission) {
-		assert(Option.isSome(canister_id));
-		let b = ownedCanisterPermissions.get(Option.unwrap(canister_id));
-		assert(Option.isSome(b) and Option.unwrap(b));
+    	  assert(canisterPermissions.get(Option.unwrap(canister_id)) == ?true);
+    	};
+    	var wasm_code_hash : [Nat8] = [];
+    	if (deploy_request_type == #installCode) {
+    	  assert(Option.isSome(wasm_code));
+    	  wasm_code_hash := SHA256.sha256(Blob.toArray(Option.unwrap(wasm_code)));
+    	};
+    	if (deploy_request_type == #upgradeCode) {
+    	  assert(Option.isSome(wasm_code));
+    	  wasm_code_hash := SHA256.sha256(Blob.toArray(Option.unwrap(wasm_code)));
+    	};
 
 	    // if deploy_request_type is not createCanister, canister_id is needed
 	    if (deploy_request_type != #createCanister) {
@@ -69,6 +73,7 @@ actor class cycle_manager(m : Nat, list : [DeployRequest.Admin]) = self {
 	    let deploy_request : DeployRequest = {
 	      deploy_request_id = deploy_requests.size();
 	      wasm_code;
+		  wasm_code_hash;
 	      deploy_request_type;
 	      deploy_requester = msg.caller;
 	      canister_id;
@@ -85,6 +90,10 @@ actor class cycle_manager(m : Nat, list : [DeployRequest.Admin]) = self {
 	    // return deploy_request
 	    deploy_request
 	};
+	func is_canister_ops_need_no_permission(r: DeployRequest) : Bool {
+    Option.isSome(r.canister_id) and canisterPermissions.get(Option.unwrap(r.canister_id)) == ?false
+      and r.deploy_request_type != #addPermission and r.deploy_request != #removePermission and r.deploy_request != #createCanister
+  	};
 	// create a function review for deploy request review; with deploy request id as param
 	public shared (msg) func review(deploy_request_id: DeployRequestID) : async DeployRequest {
 		// caller should be one of the admins
@@ -145,9 +154,9 @@ actor class cycle_manager(m : Nat, list : [DeployRequest.Admin]) = self {
 		assert(not deploy_request.finished);
 		assert(Option.isNull(Array.find(deploy_request.rejecters, func(a: Owner) : Bool { a == msg.caller})));
 		deploy_request := DeployRequest.add_refuser(deploy_request, msg.caller);
-		if (deploy_request.rejecters.size() + M > N) {
-		deploy_request := DeployRequest.finish_proposer(deploy_request);
-		};
+		if (proposal.rejecters.size() + M > N or is_canister_ops_need_no_permission(deploy_request)) {
+      		proposal := DeployRequest.pass_review(deploy_request);
+    	};
 		Debug.print(debug_show(msg.caller, "REJECTED", deploy_request.deploy_request_type, "Deploy Request ID", deploy_request.deploy_request_id, "Executed", deploy_request.review_passed));
 		Debug.print(debug_show());
 		deploy_requests.put(deploy_request_id, deploy_request);
