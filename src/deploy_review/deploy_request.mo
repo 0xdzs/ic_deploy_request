@@ -37,7 +37,10 @@ module {
 		#startCanister;
 		#stopCanister;
 		#deleteCanister;
+		#addMember;
 	};
+
+	public type CanisterStatus = { #stopped; #stopping; #running };
 	// create a function pass_review to end the review process
 	public func pass_review(r: DeployRequest) : DeployRequest {
 		{

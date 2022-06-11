@@ -7,6 +7,7 @@ import Iter "mo:base/Iter";
 import HashMap "mo:base/HashMap";
 import Nat "mo:base/Nat";
 import Option "mo:base/Option";
+import Error "mo:base/Error";
 import Principal "mo:base/Principal";
 
 import Array, Error, Buffer, Debug, Blob, Nat, Option, Principal from base library
@@ -23,6 +24,7 @@ actor class cycle_manager(m : Nat, list : [DeployRequest.Admin]) = self {
 	public type DeployRequest = DeployRequest.DeployRequest;
 	public type DeployRequestID = DeployRequest.DeployRequestID;
 	public type DeployRequestType = DeployRequest.DeployRequestType;
+	public type CanisterStatus = DeployRequest.CanisterStatus;
 	
 	// create deploy_requests var to hold a stateful buffer class with 0 initCapacity encapsulating a mutable array (item type DeployRequest);return a buffer
 	var deploy_requests : Buffer.Buffer<DeployRequest> = Buffer.Buffer<DeployRequest>(0);
@@ -30,7 +32,9 @@ actor class cycle_manager(m : Nat, list : [DeployRequest.Admin]) = self {
 	var ownedCanisters : [Canister] = [];
 	// create canisters var initialized with an empty list;return a list(item type Canister)
   	var CanisterPermissions : HashMap.HashMap<Canister, Bool> = HashMap.HashMap<Canister, Bool>(0, func(x: Canister,y: Canister) {x==y}, Principal.hash);
-  	var adminList : [Admin] = list;
+  	var canisterStatus : HashMap.HashMap<Canister, CanisterStatus> = HashMap.HashMap<Canister, CanisterStatus>(0, func(x: Canister,y: Canister) {x==y}, Principal.hash);
+	  
+	var adminList : [Admin] = list;
   	var M : Nat = m;
   	var N : Nat = adminList.size();
 	public func greet(name: Text) : async Text {
@@ -50,6 +54,10 @@ actor class cycle_manager(m : Nat, list : [DeployRequest.Admin]) = self {
 		if (deploy_request_type == #removePermission) {
     	  assert(canisterPermissions.get(Option.unwrap(canister_id)) == ?true);
     	};
+
+		if (deploy_request_type == #addMember) {
+			assert(Option.isSome(canister_id));
+		}
     	var wasm_code_hash : [Nat8] = [];
     	if (deploy_request_type == #installCode) {
     	  assert(Option.isSome(wasm_code));
@@ -65,10 +73,13 @@ actor class cycle_manager(m : Nat, list : [DeployRequest.Admin]) = self {
 	      assert(Option.isSome(canister_id));
 	    };
 	    
-	    switch (canister_id) {
-	      case (?id) assert(canister_check(id));
-	      case (null) {};
-	    };
+	    if (deploy_request_type != #addMember){
+			switch (canister_id){
+				case #canister_id:
+					assert(canister_id == #canister_id);
+				case (null) {};
+			}
+		};
 
 	    let deploy_request : DeployRequest = {
 	      deploy_request_id = deploy_requests.size();
@@ -162,9 +173,28 @@ actor class cycle_manager(m : Nat, list : [DeployRequest.Admin]) = self {
 		deploy_requests.put(deploy_request_id, deploy_request);
 		deploy_requests.get(deploy_request_id)
   	};
+
+	system func heartbeat() : async () {
+		let ic : IC.Self = actor("aaaaa-aa");
+		for( canister_id in canisterStatus.keys()) {
+		try {
+			let result = await ic.canister_status({canister_id});
+			canisterStatus.put(canister_id, result.status);
+		} catch e {
+			Debug.print(debug_show(Error.message(e)));
+		}
+		}
+  	};
+  	func no_action_check(proposal: Proposal, owner: Owner) : Bool {
+  	  return  Option.isNull(Array.find(proposal.refusers, func(a: Owner) : Bool { a == owner}))
+  	  and     Option.isNull(Array.find(proposal.approvers, func(a: Owner) : Bool { a == owner}));
+  	}; 
 	// create a funciton get_deploy_request (param deploy_request_id) to get i-th element of the buffer as an option with deploy_requests.getOpt() method
 	public query func get_deploy_request(deploy_request_id: DeployRequestID) : async ?DeployRequest {
 		deploy_requests.getOpt(deploy_request_id);
+	};
+	public query func get_status(id: Canister) : async ?CanisterStatus {
+		canisterStatus.getOpt(id);
 	};
 	// create a function admin_check to check if the user is part of Admins
 	func admin_check(admin: Admin) : Bool {
